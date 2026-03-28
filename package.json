@@ -1,0 +1,100 @@
+{
+  "name": "smart-router",
+  "displayName": "Smart Model Router",
+  "description": "A transparent model proxy that auto-selects the best Copilot model based on prompt complexity.",
+  "version": "0.2.0",
+  "publisher": "smartrouter",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Chat"
+  ],
+  "extensionDependencies": [
+    "github.copilot-chat"
+  ],
+  "enabledApiProposals": [
+    "chatProvider"
+  ],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "smart-router.openChat",
+        "title": "Smart Chat: Open",
+        "icon": "$(hubot)",
+        "category": "Smart Router"
+      },
+      {
+        "command": "smart-router.diagnose",
+        "title": "Smart Router: Diagnose Model Registration",
+        "category": "Smart Router"
+      },
+      {
+        "command": "smart-router.patch",
+        "title": "Smart Router: Patch Copilot Chat Model Picker",
+        "category": "Smart Router"
+      },
+      {
+        "command": "smart-router.unpatch",
+        "title": "Smart Router: Remove Patch from Copilot Chat",
+        "category": "Smart Router"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "smart-router.openChat",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s"
+      }
+    ],
+    "configuration": {
+      "title": "Smart Router",
+      "properties": {
+        "smart-router.models.simple": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["gpt-5.4-mini", "gpt-4o-mini", "claude-haiku-4.5"],
+          "markdownDescription": "Model fallback chain for **simple** tasks (score ≤ 4). First available model wins."
+        },
+        "smart-router.models.medium": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["gpt-5.2", "claude-sonnet-4.6", "gpt-5.4"],
+          "markdownDescription": "Model fallback chain for **medium** tasks (score 5–8). First available model wins."
+        },
+        "smart-router.models.complex": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["claude-sonnet-4.6", "gpt-5.4", "claude-opus-4.6"],
+          "markdownDescription": "Model fallback chain for **complex** tasks (score ≥ 9). First available model wins."
+        },
+        "smart-router.blocklist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Model families to **never** route to. Matched against `model.family`."
+        }
+      }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "smart",
+        "displayName": "Smart Router"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc --noEmit",
+    "test": "tsc -p ./tsconfig.test.json && node --test out-test/test/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  }
+}

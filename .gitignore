@@ -1,0 +1,26 @@
+node_modules/
+out/
+out-test/
+.venv/
+.vscode/
+*.vsix
+windowlogfile.txt
+
+# Backups / corrupted copies
+*.bak
+*.corrupted
+
+# Environment / secrets
+.env
+.env.*
+.npmrc
+.pypirc
+
+# Logs / OS cruft
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+Thumbs.db
+.DS_Store

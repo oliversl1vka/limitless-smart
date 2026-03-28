@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "out-test",
+    "rootDir": "src"
+  },
+  "include": ["src/classifier.ts", "src/test/**/*.ts"],
+  "exclude": ["node_modules", "out", "out-test"]
+}
