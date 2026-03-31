@@ -1,3 +1,16 @@
+```
+ ██████ ███    ███  █████  ██████  ████████
+██      ████  ████ ██   ██ ██   ██    ██
+ █████  ██ ████ ██ ███████ ██████     ██
+     ██ ██  ██  ██ ██   ██ ██   ██    ██
+██████  ██      ██ ██   ██ ██   ██    ██
+██████   ██████  ██    ██ ████████ ███████ ██████
+██   ██ ██    ██ ██    ██    ██    ██      ██   ██
+██████  ██    ██ ██    ██    ██    █████   ██████
+██   ██ ██    ██ ██    ██    ██    ██      ██   ██
+██   ██  ██████   ██████     ██    ███████ ██   ██
+```
+
 # Smart Router
 
 A VS Code extension that automatically routes your Copilot Chat messages to the optimal model based on complexity analysis — zero config needed, fully customizable.
@@ -178,6 +191,7 @@ The extension also logs orphaned tool call/result stripping, escalation retries,
 src/
   classifier.ts   — 11 scoring signals, outputs tier (simple/medium/complex)
   models.ts       — maps tiers to model fallback chains, blocklist, fuzzy matching
-  extension.ts    — SmartRouterProvider proxy, message sanitization, activation
+  extension.ts    — SmartRouterProvider, routing logic, activation
+  proxy.ts        — message normalization, orphan-stripping, provider↔consumer conversion
   patcher.ts      — patches Copilot Chat bundle to inject Smart Router into the model picker
 ```
