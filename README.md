@@ -1,4 +1,4 @@
-<img src="Smart router digital logo design.png" alt="Smart Router" width="480"/>
+<img src="smartroutermemelogo.png" alt="Smart Router" width="560"/>
 
 # Smart Router
 
