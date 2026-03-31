@@ -90,11 +90,13 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "tsc --noEmit",
+    "knip": "knip",
     "test": "tsc -p ./tsconfig.test.json && node --test out-test/test/**/*.test.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.95.0",
     "@types/node": "^20.0.0",
+    "knip": "^5",
     "typescript": "^5.5.0"
   }
 }

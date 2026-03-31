@@ -2,7 +2,7 @@ import type * as vscode from "vscode";
 
 export type Tier = "simple" | "medium" | "complex";
 
-export interface ClassificationResult {
+interface ClassificationResult {
   tier: Tier;
   score: number;
   reasons: string[];
@@ -133,8 +133,7 @@ const HIGH_COMPLEXITY_LANGUAGES = new Set([
   "scala",
 ]);
 
-function scoreLanguageContext(languageId?: string): Signal {
-  if (!languageId) return { points: 0, reason: "" };
+function scoreLanguageContext(languageId: string): Signal {
   if (HIGH_COMPLEXITY_LANGUAGES.has(languageId)) {
     return { points: 1, reason: `complex language context (${languageId})` };
   }
@@ -256,14 +255,7 @@ function scoreAmbiguity(prompt: string): Signal {
 // ── Conversation depth ───────────────────────────────────────────────
 function scoreConversationDepth(messageCount: number): Signal {
   if (messageCount >= 11) return { points: 2, reason: `deep conversation (${messageCount} messages)` };
-  if (messageCount >= 6) return { points: 1, reason: `extended conversation (${messageCount} messages)` };
   if (messageCount >= 3) return { points: 1, reason: `multi-turn conversation (${messageCount} messages)` };
-  return { points: 0, reason: "" };
-}
-
-// ── Agent mode detection ─────────────────────────────────────────────
-function scoreToolCallingPresence(hasTools: boolean): Signal {
-  if (hasTools) return { points: 1, reason: "agent mode (tools present)" };
   return { points: 0, reason: "" };
 }
 
@@ -288,7 +280,7 @@ export function classifyComplexity(
     signals.push(scoreConversationDepth(metadata.messageCount));
   }
   if (metadata?.hasTools) {
-    signals.push(scoreToolCallingPresence(metadata.hasTools));
+    signals.push({ points: 1, reason: "agent mode (tools present)" });
   }
   if (metadata?.activeLanguageId) {
     signals.push(scoreLanguageContext(metadata.activeLanguageId));

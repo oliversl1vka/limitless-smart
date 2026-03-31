@@ -44,7 +44,7 @@ export async function getAnyCopilotModel(): Promise<vscode.LanguageModelChat | u
   return models[0];
 }
 
-export interface ModelSelection {
+interface ModelSelection {
   model: vscode.LanguageModelChat;
   family: string;
 }
@@ -122,15 +122,6 @@ export async function selectModelForTier(
   return models.length > 0 ? { model: models[0], family: models[0].family } : undefined;
 }
 
-/** Return the configured chains for display purposes. */
-export function getConfiguredChains(): Record<Tier, string[]> {
-  return {
-    simple: getChain("simple"),
-    medium: getChain("medium"),
-    complex: getChain("complex"),
-  };
-}
-
 /** Human-readable label for a tier. */
 export function tierLabel(tier: Tier): string {
   switch (tier) {
@@ -141,10 +132,4 @@ export function tierLabel(tier: Tier): string {
     case "complex":
       return "Complex";
   }
-}
-
-/** List all models currently available from Copilot. */
-export async function listAvailableModels(): Promise<string[]> {
-  const models = await getCopilotModels();
-  return [...new Set(models.map((m) => `${m.family} (${m.id})`))];
 }
