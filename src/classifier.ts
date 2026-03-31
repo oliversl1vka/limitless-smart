@@ -298,8 +298,8 @@ export function classifyComplexity(
   const reasons = signals.map((s) => s.reason).filter(Boolean);
 
   let tier: Tier;
-  if (score <= 4) tier = "simple";
-  else if (score <= 8) tier = "medium";
+  if (score <= 2) tier = "simple";
+  else if (score <= 6) tier = "medium";
   else tier = "complex";
 
   return { tier, score, reasons };

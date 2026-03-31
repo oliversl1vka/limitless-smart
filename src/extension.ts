@@ -487,18 +487,34 @@ function sanitizeMessagesForProxy(
     messages: sanitized,
     strippedToolCalls,
     strippedToolResults,
+    orphanedCallDetails,
+    orphanedResultDetails,
   } = stripOrphanedToolParts(normalizedMessages);
 
   if (strippedToolCalls > 0) {
     log.warn(
       `Removed ${strippedToolCalls} orphaned tool call part(s) before proxying request`,
     );
+    // Debug-level detail — only visible when output channel log level is set to Debug/Trace.
+    // Each line shows: msgIndex | callId | toolName | reason | inputSnippet
+    for (const d of orphanedCallDetails) {
+      log.debug(
+        `  [orphaned-call]  msg#${d.messageIndex}  callId=${d.callId}  tool=${d.name}  reason=${d.reason}  input=${d.inputSnippet}`,
+      );
+    }
   }
 
   if (strippedToolResults > 0) {
     log.warn(
       `Removed ${strippedToolResults} orphaned tool result part(s) before proxying request`,
     );
+    // Debug-level detail — only visible when output channel log level is set to Debug/Trace.
+    // Each line shows: msgIndex | callId | reason | contentSnippet
+    for (const d of orphanedResultDetails) {
+      log.debug(
+        `  [orphaned-result]  msg#${d.messageIndex}  callId=${d.callId}  reason=${d.reason}  content=${d.contentSnippet}`,
+      );
+    }
   }
 
   if (strippedInvalidParts > 0) {
@@ -507,19 +523,93 @@ function sanitizeMessagesForProxy(
     );
   }
 
+  // Always-on debug summary: count tool calls & results being proxied
+  // so we can verify nothing is silently lost.
+  let proxiedToolCalls = 0;
+  let proxiedToolResults = 0;
+  const toolCallNames: string[] = [];
+  const toolResultCallIds: string[] = [];
+  for (const msg of sanitized) {
+    for (const part of msg.content) {
+      if (part instanceof vscode.LanguageModelToolCallPart) {
+        proxiedToolCalls++;
+        toolCallNames.push(part.name);
+      } else if (part instanceof vscode.LanguageModelToolResultPart) {
+        proxiedToolResults++;
+        toolResultCallIds.push(part.callId);
+      }
+    }
+  }
+  log.debug(
+    `[proxy-summary] messages=${sanitized.length}  toolCalls=${proxiedToolCalls}  toolResults=${proxiedToolResults}  strippedCalls=${strippedToolCalls}  strippedResults=${strippedToolResults}`,
+  );
+  if (toolCallNames.length > 0) {
+    log.debug(
+      `[proxy-tools] ${toolCallNames.join(", ")}`,
+    );
+  }
+
   return sanitized;
+}
+
+// ── Orphan debug types ───────────────────────────────────────────────
+
+/** Details about a single orphaned tool call that was stripped. */
+interface OrphanedToolCallDetail {
+  /** The call ID of the stripped tool call. */
+  callId: string;
+  /** The tool name that was invoked. */
+  name: string;
+  /** Reason the call was considered orphaned. */
+  reason: "no-matching-result-in-next-messages";
+  /** First 120 chars of serialised input for inspection. */
+  inputSnippet: string;
+  /** Zero-based index of the assistant message in the sanitized array. */
+  messageIndex: number;
+}
+
+/** Details about a single orphaned tool result that was stripped. */
+interface OrphanedToolResultDetail {
+  /** The call ID of the stripped tool result. */
+  callId: string;
+  /** Reason the result was considered orphaned. */
+  reason:
+    | "no-matching-call-in-previous-assistant-message"
+    | "result-in-user-message-without-preceding-assistant-call";
+  /** First 120 chars of serialised content for inspection. */
+  contentSnippet: string;
+  /** Zero-based index of the user message in the sanitized array. */
+  messageIndex: number;
+}
+
+/** Return value of `stripOrphanedToolParts`, now including per-item debug detail. */
+interface StripOrphanedResult {
+  messages: vscode.LanguageModelChatRequestMessage[];
+  strippedToolCalls: number;
+  strippedToolResults: number;
+  /** Full detail for each stripped tool call — populated when debug logging is on. */
+  orphanedCallDetails: OrphanedToolCallDetail[];
+  /** Full detail for each stripped tool result — populated when debug logging is on. */
+  orphanedResultDetails: OrphanedToolResultDetail[];
+}
+
+function snippetify(value: unknown, maxLen = 120): string {
+  try {
+    const s = typeof value === "string" ? value : JSON.stringify(value);
+    return s.length <= maxLen ? s : s.slice(0, maxLen) + "…";
+  } catch {
+    return String(value).slice(0, maxLen);
+  }
 }
 
 function stripOrphanedToolParts(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
-): {
-  messages: vscode.LanguageModelChatRequestMessage[];
-  strippedToolCalls: number;
-  strippedToolResults: number;
-} {
+): StripOrphanedResult {
   const sanitized: vscode.LanguageModelChatRequestMessage[] = [];
   let strippedToolCalls = 0;
   let strippedToolResults = 0;
+  const orphanedCallDetails: OrphanedToolCallDetail[] = [];
+  const orphanedResultDetails: OrphanedToolResultDetail[] = [];
 
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
@@ -538,27 +628,52 @@ function stripOrphanedToolParts(
         continue;
       }
 
-      const nextMessage = messages[index + 1];
-      const nextUserContent: UserProxyPart[] = [];
+      // ── Scan ALL consecutive user messages for matching tool results ──
       const matchedToolResultIds = new Set<string>();
+      const collectedUserMessages: {
+        original: vscode.LanguageModelChatRequestMessage;
+        filteredContent: UserProxyPart[];
+        originalIndex: number;
+      }[] = [];
 
-      if (nextMessage?.role === vscode.LanguageModelChatMessageRole.User) {
-        for (const part of nextMessage.content as readonly UserProxyPart[]) {
+      let lookahead = index + 1;
+      while (
+        lookahead < messages.length &&
+        messages[lookahead].role === vscode.LanguageModelChatMessageRole.User
+      ) {
+        const userMsg = messages[lookahead];
+        const filteredContent: UserProxyPart[] = [];
+
+        for (const part of userMsg.content as readonly UserProxyPart[]) {
           const toolResult = getToolResultInfo(part);
           if (!toolResult) {
-            nextUserContent.push(part);
+            filteredContent.push(part);
             continue;
           }
 
           if (toolCallIds.has(toolResult.callId)) {
-            nextUserContent.push(part);
+            filteredContent.push(part);
             matchedToolResultIds.add(toolResult.callId);
           } else {
             strippedToolResults++;
+            orphanedResultDetails.push({
+              callId: toolResult.callId,
+              reason: "no-matching-call-in-previous-assistant-message",
+              contentSnippet: snippetify(toolResult.content),
+              messageIndex: lookahead,
+            });
           }
         }
+
+        collectedUserMessages.push({
+          original: userMsg,
+          filteredContent,
+          originalIndex: lookahead,
+        });
+        lookahead++;
       }
 
+      // ── Back-filter assistant tool calls to only keep matched ones ──
       const nextAssistantContent: AssistantProxyPart[] = [];
       for (const part of message.content as readonly AssistantProxyPart[]) {
         const toolCall = getToolCallInfo(part);
@@ -571,6 +686,13 @@ function stripOrphanedToolParts(
           nextAssistantContent.push(part);
         } else {
           strippedToolCalls++;
+          orphanedCallDetails.push({
+            callId: toolCall.callId,
+            name: toolCall.name,
+            reason: "no-matching-result-in-next-messages",
+            inputSnippet: snippetify(toolCall.input),
+            messageIndex: index,
+          });
         }
       }
 
@@ -582,16 +704,19 @@ function stripOrphanedToolParts(
         });
       }
 
-      if (nextMessage?.role === vscode.LanguageModelChatMessageRole.User) {
-        if (nextUserContent.length > 0) {
+      // ── Emit all consumed user messages (preserving non-tool-result parts) ──
+      for (const entry of collectedUserMessages) {
+        if (entry.filteredContent.length > 0) {
           sanitized.push({
-            role: nextMessage.role,
-            name: nextMessage.name,
-            content: nextUserContent,
+            role: entry.original.role,
+            name: entry.original.name,
+            content: entry.filteredContent,
           });
         }
-        index++;
       }
+
+      // Advance index past all the user messages we just consumed
+      index = lookahead - 1;
 
       continue;
     }
@@ -600,8 +725,16 @@ function stripOrphanedToolParts(
       const nextContent: UserProxyPart[] = [];
 
       for (const part of message.content as readonly UserProxyPart[]) {
-        if (getToolResultInfo(part)) {
+        const toolResult = getToolResultInfo(part);
+        if (toolResult) {
           strippedToolResults++;
+          orphanedResultDetails.push({
+            callId: toolResult.callId,
+            reason:
+              "result-in-user-message-without-preceding-assistant-call",
+            contentSnippet: snippetify(toolResult.content),
+            messageIndex: index,
+          });
           continue;
         }
 
@@ -622,7 +755,13 @@ function stripOrphanedToolParts(
     sanitized.push(message);
   }
 
-  return { messages: sanitized, strippedToolCalls, strippedToolResults };
+  return {
+    messages: sanitized,
+    strippedToolCalls,
+    strippedToolResults,
+    orphanedCallDetails,
+    orphanedResultDetails,
+  };
 }
 
 /** Convert provider-side options to consumer-side request options. */

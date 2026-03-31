@@ -54,39 +54,52 @@ Or press **Ctrl+Alt+S** / click the **🤖 Smart** button in the status bar.
 
 ## How It Works
 
-Select **Smart Router** in the model picker, then just type your message. The extension scores it (0–10) using five heuristic signals:
+Select **Smart Router** in the model picker, then just type your message. The extension scores it using multiple heuristic signals:
 
-| Signal | Max Points |
-|---|---|
-| Message length (word count) | 3 |
-| Code block presence & size | 2 |
-| Complexity keywords (architecture, algorithm, refactor…) | 3 |
-| Multi-step / multi-question | 1 |
-| Attached file references | 1 |
+| Signal | Max Points | Description |
+|---|---|---|
+| Message length (word count) | 3 | Longer messages suggest more complex tasks |
+| Code block presence & size | 2 | Large or multiple code blocks add complexity |
+| Complexity keywords | 3 | Architecture, algorithm, refactor, security… |
+| Multi-step / multi-question | 2 | Sequential instructions or multiple questions |
+| Attached file references | 3 | 3–4 files = +1, 5–7 = +2, 8+ = +3 |
+| Intent detection | −1 to +3 | Explain = −1, generate = +1, review/plan = +2, large-scope = +3 |
+| Error/stacktrace context | −1 to +1 | Clear stack trace + "fix" = −1, vague error = +1 |
+| Ambiguity | 0 to +2 | Short vague prompts like "fix this" score higher |
+| Conversation depth | 0 to +2 | Longer conversations escalate the tier |
+| Agent mode (tools present) | +1 | Tool-calling mode needs capable models |
+| Language complexity | +1 | Rust, C++, Haskell, etc. add a point |
 
-Based on the total score it routes to a model tier:
+The routing follows a **20/60/20 split** — most prompts land in medium tier:
 
 | Tier | Score | Default Models (first available wins) |
 |---|---|---|
-| **Simple** | ≤ 4 | `gpt-5.4-mini` → `gpt-4o-mini` → `claude-haiku-4.5` |
-| **Medium** | 5–8 | `gpt-5.2` → `claude-sonnet-4.6` → `gpt-5.4` |
-| **Complex** | ≥ 9 | `claude-sonnet-4.6` → `gpt-5.4` → `claude-opus-4.6` |
+| **Simple** | ≤ 2 | `gpt-5.4-mini` → `claude-haiku-4.5` |
+| **Medium** | 3–6 | `claude-sonnet-4.6` → `gpt-5.4` |
+| **Complex** | ≥ 7 | `claude-opus-4.6` |
 
 Each tier tries models left-to-right. The first one available from Copilot wins. If every model in the chain is unavailable it falls back to any available Copilot model — routing never fails.
 
 ## How Routing Works
 
-The Smart Router extension uses several signal functions to determine the complexity of a message and route it to the appropriate model based on that complexity.
+The classifier in `src/classifier.ts` runs 11 signal functions against each prompt. Keywords inside code blocks are stripped before scoring so pasted code doesn't inflate the result. The extension also passes metadata from the conversation context:
 
-| Signal Function | Description | Example |
-| --- | --- | --- |
-| `useMessageLength` | Calculates the length of the message in words. | ```typescript const message = "How to bake a cake?"; const length = useMessageLength(message); // length: 5 ``` |
-| `useCodeBlockPresenceAndSize` | Determines if there is a code block and its size. | ```typescript const message = "Here's some code:\n\n```python\ndef add(a, b):\n    return a + b\n```"; const result = useCodeBlockPresenceAndSize(message); // { hasCode: true, size: 5 } ``` |
-| `useComplexityKeywords` | Checks for complexity keywords in the message. | ```typescript const message = "Explain quantum computing."; const result = useComplexityKeywords(message); // { found: true, keywords: ["quantum", "computing"] } ``` |
-| `useMultiStepOrMultiQuestion` | Determines if the message is multi-step or contains multiple questions. | ```typescript const message = "What is the capital of France? What is 2 + 2?"; const result = useMultiStepOrMultiQuestion(message); // { isMultiStep: true } ``` |
-| `useAttachedFileReferences` | Checks for attached file references in the message. | ```typescript const message = "Check out this file: project.pdf"; const result = useAttachedFileReferences(message); // { hasFiles: true, files: ["project.pdf"] } ```
+- **Message count** — longer conversations escalate automatically
+- **Tool presence** — agent mode (tool-calling) nudges toward more capable models
+- **Active editor language** — complex languages like Rust or C++ add weight
+- **File reference count** — inferred from both `#file:` tags and path patterns in the prompt
 
-Based on the values returned by these signal functions, the total score is calculated and the appropriate model tier is determined.
+The tier never downgrades mid-conversation — if a complex discussion started, follow-up messages like "ok do it" stay at the complex tier. On model failure, the router auto-escalates one tier up with a single retry.
+
+### Model Blocklist
+
+Add model families to `smart-router.blocklist` to exclude them from routing:
+
+```jsonc
+{
+  "smart-router.blocklist": ["gpt-4o-mini"]
+}
+```
 
 ## Configuring Models
 
@@ -97,21 +110,17 @@ Open **Settings → Extensions → Smart Router** (or edit `settings.json` direc
   // Simple tasks — fast & cheap
   "smart-router.models.simple": [
     "gpt-5.4-mini",
-    "gpt-4o-mini",
     "claude-haiku-4.5"
   ],
 
   // Medium tasks — balanced
   "smart-router.models.medium": [
-    "gpt-5.2",
     "claude-sonnet-4.6",
     "gpt-5.4"
   ],
 
-  // Complex tasks — deep reasoning, with the most expensive model reserved last
+  // Complex tasks — deep reasoning
   "smart-router.models.complex": [
-    "claude-sonnet-4.6",
-    "gpt-5.4",
     "claude-opus-4.6"
   ]
 }
@@ -128,9 +137,9 @@ Each array is a **fallback chain** — put your preferred model first. You can u
 
 | Prompt complexity | Routes to |
 |---|---|
-| Simple questions | gpt-5.4-mini / gpt-4o-mini |
-| Medium tasks | gpt-5.2 / claude-sonnet-4.6 |
-| Complex problems | claude-sonnet-4.6 / gpt-5.4 / claude-opus-4.6 |
+| Simple questions | gpt-5.4-mini / claude-haiku-4.5 |
+| Medium tasks | claude-sonnet-4.6 / gpt-5.4 |
+| Complex problems | claude-opus-4.6 |
 
 ## Keyboard Shortcut
 
@@ -139,6 +148,15 @@ Each array is a **fallback chain** — put your preferred model first. You can u
 | `Ctrl+Alt+S` (Win/Linux) | Open Copilot Chat |
 | `Cmd+Alt+S` (Mac) | Open Copilot Chat |
 
+## Commands
+
+| Command | Description |
+|---|---|
+| `Smart Router: Diagnose Model Registration` | Show all registered models and verify Smart Router is visible |
+| `Smart Router: Patch Copilot Chat Model Picker` | Manually inject Smart Router into the Copilot Chat model picker |
+| `Smart Router: Remove Patch from Copilot Chat` | Restore the original Copilot Chat bundle |
+| `Smart Chat: Open` | Open Copilot Chat (`Ctrl+Alt+S`) |
+
 ## Building
 
 ```bash
@@ -146,9 +164,20 @@ npm run compile    # one-time build
 npm run watch      # rebuild on save
 ```
 
+## Logging & Debugging
 
-To access logs and run commands, follow these steps:
+1. Open the Output panel (`Ctrl+Shift+U` / `Cmd+Shift+U`)
+2. Select **Smart Router** from the dropdown
+3. Every routed request logs: tier, score, signal reasons, and selected model
 
-- Open the Output view in VS Code (`Ctrl+Shift+U` / `Cmd+Shift+U`).
-- Navigate to the Smart Router extension output.
-- Run any necessary commands directly in the terminal or via the extension interface.
+The extension also logs orphaned tool call/result stripping, escalation retries, and conversation continuity decisions.
+
+## Project Structure
+
+```
+src/
+  classifier.ts   — 11 scoring signals, outputs tier (simple/medium/complex)
+  models.ts       — maps tiers to model fallback chains, blocklist, fuzzy matching
+  extension.ts    — SmartRouterProvider proxy, message sanitization, activation
+  patcher.ts      — patches Copilot Chat bundle to inject Smart Router into the model picker
+```

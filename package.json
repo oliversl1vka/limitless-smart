@@ -56,20 +56,20 @@
         "smart-router.models.simple": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["gpt-5.4-mini", "gpt-4o-mini", "claude-haiku-4.5"],
-          "markdownDescription": "Model fallback chain for **simple** tasks (score ≤ 4). First available model wins."
+          "default": ["gpt-5.4-mini", "claude-haiku-4.5"],
+          "markdownDescription": "Model fallback chain for **simple** tasks (score ≤ 2). First available model wins."
         },
         "smart-router.models.medium": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["gpt-5.2", "claude-sonnet-4.6", "gpt-5.4"],
-          "markdownDescription": "Model fallback chain for **medium** tasks (score 5–8). First available model wins."
+          "default": ["claude-sonnet-4.6", "gpt-5.4"],
+          "markdownDescription": "Model fallback chain for **medium** tasks (score 3–6). First available model wins."
         },
         "smart-router.models.complex": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["claude-sonnet-4.6", "gpt-5.4", "claude-opus-4.6"],
-          "markdownDescription": "Model fallback chain for **complex** tasks (score ≥ 9). First available model wins."
+          "default": ["claude-opus-4.6"],
+          "markdownDescription": "Model fallback chain for **complex** tasks (score ≥ 7). First available model wins."
         },
         "smart-router.blocklist": {
           "type": "array",

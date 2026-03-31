@@ -8,7 +8,7 @@ const ref = (uri: string) => ({ id: uri, value: uri } as any);
 test("classifies a short simple prompt as simple", () => {
   const result = classifyComplexity("How do I create a file?", []);
   assert.equal(result.tier, "simple");
-  assert.ok(result.score <= 4);
+  assert.ok(result.score <= 2);
 });
 
 test("classifies a long prompt with keywords as medium or complex", () => {
@@ -91,7 +91,7 @@ test("keeps short tool-enabled prompts out of complex tier", () => {
   const metadata: ClassifierMetadata = { hasTools: true, messageCount: 2 };
   const result = classifyComplexity("list files in src", [], metadata);
   assert.notEqual(result.tier, "complex");
-  assert.ok(result.score <= 4);
+  assert.ok(result.score <= 6);
 });
 
 test("requires a higher score before using complex tier", () => {

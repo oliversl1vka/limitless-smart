@@ -3,9 +3,9 @@ import type { Tier } from "./classifier";
 
 // ── Default fallback chains (overridden by user settings) ────────────
 const DEFAULT_CHAINS: Record<Tier, string[]> = {
-  simple: ["gpt-5.4-mini", "gpt-4o-mini", "claude-haiku-4.5"],
-  medium: ["gpt-5.2", "claude-sonnet-4.6", "gpt-5.4"],
-  complex: ["claude-sonnet-4.6", "gpt-5.4", "claude-opus-4.6"],
+  simple: ["gpt-5.4-mini", "claude-haiku-4.5"],
+  medium: ["claude-sonnet-4.6", "gpt-5.4"],
+  complex: ["claude-opus-4.6"],
 };
 
 /** Read the user-configured chain for a tier, falling back to defaults. */
