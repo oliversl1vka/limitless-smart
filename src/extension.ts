@@ -6,9 +6,6 @@ import { convertMessages, convertOptions, stringifyTokenInput } from "./proxy";
 
 const VENDOR = "smart";
 
-/** Maximum number of agentic tool-calling iterations per user request. */
-const MAX_TOOL_ITERATIONS = 15;
-
 // ── Language Model Provider (transparent proxy) ──────────────────────
 
 class SmartRouterProvider implements vscode.LanguageModelChatProvider {
@@ -186,12 +183,14 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
     token: vscode.CancellationToken,
   ): Promise<void> {
     const currentMessages = [...messages];
+    let iteration = 0;
 
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    for (;;) {
       if (token.isCancellationRequested) return;
+      iteration++;
 
       this._log.info(
-        `[agentic-loop] Iteration ${iteration + 1}/${MAX_TOOL_ITERATIONS} — ` +
+        `[agentic-loop] Iteration ${iteration} — ` +
           `${currentMessages.length} messages`,
       );
 
@@ -287,16 +286,6 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
         vscode.LanguageModelChatMessage.User(toolResultParts),
       );
     }
-
-    // Reached the iteration limit — inform the user
-    this._log.warn(
-      `[agentic-loop] Reached maximum iterations (${MAX_TOOL_ITERATIONS})`,
-    );
-    progress.report(
-      new vscode.LanguageModelTextPart(
-        "\n\n[Smart Router: Reached maximum tool-calling iterations. The response may be incomplete.]",
-      ),
-    );
   }
 
   // Delegate token counting to a cached Copilot model (avoids repeated selectChatModels)
