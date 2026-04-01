@@ -6,6 +6,9 @@ import { convertMessages, convertOptions, stringifyTokenInput } from "./proxy";
 
 const VENDOR = "smart";
 
+/** Maximum number of agentic tool-calling iterations per user request. */
+const MAX_TOOL_ITERATIONS = 15;
+
 // ── Language Model Provider (transparent proxy) ──────────────────────
 
 class SmartRouterProvider implements vscode.LanguageModelChatProvider {
@@ -110,17 +113,12 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
     const chatMessages = convertMessages(messages, this._log);
     const requestOptions = convertOptions(options);
 
-    // Forward to the real model and stream everything back
+    // Forward to the real model and stream everything back.
+    // When tools are present, run the agentic loop so all tool calls
+    // are resolved within this single provider invocation — this
+    // avoids burning one premium Copilot request per tool round-trip.
     try {
-      const response = await model.sendRequest(
-        chatMessages,
-        requestOptions,
-        token,
-      );
-      for await (const part of response.stream) {
-        if (token.isCancellationRequested) break;
-        progress.report(part as vscode.LanguageModelResponsePart);
-      }
+      await this._executeRequest(model, chatMessages, requestOptions, progress, token);
     } catch (err) {
       // On error, attempt one escalation retry with next tier up
       const escalatedTier = escalateTier(effectiveTier);
@@ -131,15 +129,7 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
         const fallback = await selectModelForTier(escalatedTier);
         if (fallback && fallback.model.id !== model.id) {
           try {
-            const retryResponse = await fallback.model.sendRequest(
-              chatMessages,
-              requestOptions,
-              token,
-            );
-            for await (const part of retryResponse.stream) {
-              if (token.isCancellationRequested) break;
-              progress.report(part as vscode.LanguageModelResponsePart);
-            }
+            await this._executeRequest(fallback.model, chatMessages, requestOptions, progress, token);
             return;
           } catch (retryErr) {
             this._log.error(
@@ -157,6 +147,151 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
       // Re-throw if escalation also failed or wasn't possible
       throw err;
     }
+  }
+
+  /**
+   * Send a request to the model, handling tool calls internally when tools
+   * are present (agentic loop) or streaming directly otherwise.
+   */
+  private async _executeRequest(
+    model: vscode.LanguageModelChat,
+    messages: vscode.LanguageModelChatMessage[],
+    options: vscode.LanguageModelChatRequestOptions,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    if (options.tools?.length) {
+      await this._runAgenticLoop(model, messages, options, progress, token);
+    } else {
+      const response = await model.sendRequest(messages, options, token);
+      for await (const part of response.stream) {
+        if (token.isCancellationRequested) break;
+        progress.report(part as vscode.LanguageModelResponsePart);
+      }
+    }
+  }
+
+  /**
+   * Agentic tool-calling loop: sends the request to the real model, and if
+   * the model responds with tool calls, executes them via `vscode.lm.invokeTool`,
+   * appends the results to the conversation, and re-sends — all within this
+   * single `provideLanguageModelChatResponse` invocation so only ONE premium
+   * Copilot request is billed to the user.
+   */
+  private async _runAgenticLoop(
+    model: vscode.LanguageModelChat,
+    messages: vscode.LanguageModelChatMessage[],
+    options: vscode.LanguageModelChatRequestOptions,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    const currentMessages = [...messages];
+
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      if (token.isCancellationRequested) return;
+
+      this._log.info(
+        `[agentic-loop] Iteration ${iteration + 1}/${MAX_TOOL_ITERATIONS} — ` +
+          `${currentMessages.length} messages`,
+      );
+
+      const response = await model.sendRequest(
+        currentMessages,
+        options,
+        token,
+      );
+
+      // Collect all parts from the stream so we can inspect tool calls
+      const collectedParts: (
+        | vscode.LanguageModelTextPart
+        | vscode.LanguageModelToolCallPart
+      )[] = [];
+      for await (const part of response.stream) {
+        if (token.isCancellationRequested) return;
+        if (
+          part instanceof vscode.LanguageModelTextPart ||
+          part instanceof vscode.LanguageModelToolCallPart
+        ) {
+          collectedParts.push(part);
+        }
+      }
+
+      // Separate tool call parts from everything else
+      const toolCallParts = collectedParts.filter(
+        (p): p is vscode.LanguageModelToolCallPart =>
+          p instanceof vscode.LanguageModelToolCallPart,
+      );
+
+      if (toolCallParts.length === 0) {
+        // No tool calls — this is the final response. Stream it to the caller.
+        for (const part of collectedParts) {
+          if (token.isCancellationRequested) return;
+          progress.report(part);
+        }
+        return;
+      }
+
+      // Tool calls found — execute them within this invocation
+      this._log.info(
+        `[agentic-loop] Executing ${toolCallParts.length} tool call(s): ` +
+          toolCallParts.map((tc) => tc.name).join(", "),
+      );
+
+      // Build an assistant message containing the full model response
+      // (text + tool calls) and append it to the conversation
+      currentMessages.push(
+        vscode.LanguageModelChatMessage.Assistant(collectedParts),
+      );
+
+      // Execute each tool call and collect results
+      const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
+      for (const toolCall of toolCallParts) {
+        if (token.isCancellationRequested) return;
+        try {
+          this._log.info(
+            `[agentic-loop] Invoking tool: ${toolCall.name} (callId=${toolCall.callId})`,
+          );
+          const result = await vscode.lm.invokeTool(
+            toolCall.name,
+            { input: toolCall.input, toolInvocationToken: undefined },
+            token,
+          );
+          toolResultParts.push(
+            new vscode.LanguageModelToolResultPart(
+              toolCall.callId,
+              result.content,
+            ),
+          );
+        } catch (err) {
+          this._log.warn(
+            `[agentic-loop] Tool ${toolCall.name} (callId=${toolCall.callId}) failed: ${err}`,
+          );
+          // Return the error as a tool result so the model can reason about it
+          toolResultParts.push(
+            new vscode.LanguageModelToolResultPart(toolCall.callId, [
+              new vscode.LanguageModelTextPart(
+                `Tool execution failed: ${err}`,
+              ),
+            ]),
+          );
+        }
+      }
+
+      // Append a user message with the tool results
+      currentMessages.push(
+        vscode.LanguageModelChatMessage.User(toolResultParts),
+      );
+    }
+
+    // Reached the iteration limit — inform the user
+    this._log.warn(
+      `[agentic-loop] Reached maximum iterations (${MAX_TOOL_ITERATIONS})`,
+    );
+    progress.report(
+      new vscode.LanguageModelTextPart(
+        "\n\n[Smart Router: Reached maximum tool-calling iterations. The response may be incomplete.]",
+      ),
+    );
   }
 
   // Delegate token counting to a cached Copilot model (avoids repeated selectChatModels)
