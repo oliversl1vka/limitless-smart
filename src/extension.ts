@@ -160,7 +160,7 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    if (options.tools?.length) {
+    if ((options.tools?.length ?? 0) > 0) {
       await this._runAgenticLoop(model, messages, options, progress, token);
     } else {
       const response = await model.sendRequest(messages, options, token);
@@ -253,7 +253,12 @@ class SmartRouterProvider implements vscode.LanguageModelChatProvider {
           );
           const result = await vscode.lm.invokeTool(
             toolCall.name,
-            { input: toolCall.input, toolInvocationToken: undefined },
+            {
+              input: toolCall.input,
+              // undefined — we are a model provider, not a chat participant,
+              // so we have no ChatParticipantToolToken to pass.
+              toolInvocationToken: undefined,
+            },
             token,
           );
           toolResultParts.push(
